@@ -111,7 +111,7 @@ namespace LongRunningActions.Controllers
         {
             var jobs = HttpContext.Session.Get<IEnumerable<string>>(key);
 
-            if (jobs == null || !jobs.Any()) yield break;
+            if (jobs == null) yield break;
 
             var jobsWithUpdatedStatus = _longProcessService.GetJobsInfo(jobs.ToArray()).ToList();
 

@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using LongRunningActions.LogForNet;
+﻿using LongRunningActions.LogForNet;
 using LongRunningActions.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -36,12 +32,9 @@ namespace LongRunningActions
 
             // Adds a default in-memory implementation of IDistributedCache.
             services.AddDistributedMemoryCache();
-            //services.AddSession();
-
+            
             services.AddSession(options =>
             {
-                // Set a short timeout for easy testing.
-                //options.IdleTimeout = TimeSpan.FromSeconds(10);
                 options.CookieHttpOnly = true;
                 options.CookieName = ".longrunning.actions";
             });
