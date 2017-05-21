@@ -1,0 +1,273 @@
+﻿@{
+    ViewData["Title"] = "Home Page";
+}
+
+<div class="row" style="margin-top: 20px;">
+
+    <a class="btn btn-primary pull-right"
+       role="button"
+       data-toggle="collapse"
+       href="#backgroundTasks"
+       aria-expanded="false"
+       aria-controls="backgroundTasks">
+        See background tasks
+    </a>
+    <div class="collapse" id="backgroundTasks">
+        <div class="well" id="_jobs">
+            <div class="alert alert-warning">
+                No jobs
+            </div>
+        </div>
+    </div>
+</div>
+
+<h1>Background tasks</h1>
+
+<div class="row">
+    
+    <div class="col-md-6">
+        <h3>Click here to cook some fresh pizza.</h3>
+        <p>Usually this will take around 20 seconds to complete</p>
+        <button id="_cook_pizza" class="btn btn-primary">Cook Pizza</button>
+        <br/>
+        <div id="_pizza_action_message"></div>
+    </div>
+    
+    <div class="col-md-6">
+        <h3>Press book flight to initiate the booking process.</h3>
+        <p>Once a task is started, you cannot click the button again. You have to wait for it to finish.</p>
+        <button id="_book_flight" class="btn btn-primary">Book Flight</button>
+        <br/>
+        <div id="_flight_action_message"></div>
+    </div>
+</div>
+<div style="display: none; width: 0px; height: 0px; padding: 0px; margin: 0px;">
+    <div class="alert alert-success" id="_alert_success"></div>
+    <div class="alert alert-warning" id="_alert_warning"></div>
+    <div class="alert alert-danger" id="_alert_danger"></div>
+    <div class="alert alert-info" id="_alert_info"></div>
+
+    <span class="text-success" id="_text_success"></span>
+    <span class="text-info" id="_text_info"></span>
+    <span class="text-warning" id="_text_warning"></span>
+    <span class="text-danger" id="_text_danger"></span>
+    <img src="images/img-loading-30-30.gif" id="_img_loading_30_30" alt="" />
+</div>
+
+@section Scripts
+{
+    <script type="text/javascript">
+
+        var continuePoll = true;
+        var turnOnPolling = true;
+        var pollingDelay = 5000;
+
+        var messages = {
+            NoJobsRunning: 'No background jobs running at the moment.',
+            ErrorQueuingJob: 'An error occurred while queuing jobs. Please try again.',
+            ErrorPollingJob: 'Error occurred while polling background jobs status',
+            JobCompleted: 'Job completed. Click to start again!',
+            jobsInProgress: 'Jobs are still being processed. Please wait...',
+            jobsQueued: 'Jobs queued for processing',
+        };
+
+        var constants = {
+            jobInProgress: "100",
+            jobQueuedForProcessing: "101",
+            allJobsCompleted: "201",
+            jobsNotFound: "404",
+
+            pizzaJobKey: 'CookPizza',
+            bookFlightJobKey:'BookFlight'
+        };
+
+        var actions = {
+            bookFlight: '_book_flight',
+            cookPizza: '_cook_pizza',
+        };
+
+        var messageBoxes = {
+            cookPizzaActionMessage: '_pizza_action_message',
+            bookFlightActionMessage: '_flight_action_message',
+        };
+
+        var containers = {
+            jobs: '_jobs',
+            alertSuccess: '_alert_success',
+            alertWarning: '_alert_warning',
+            alertDanger: '_alert_danger',
+            alertInfo: '_alert_info',
+
+            textSuccess: '_text_success',
+            texttWarning: '_text_warning',
+            textDanger: '_text_danger',
+            textInfo: '_text_info',
+        };
+
+        var images = {
+            loading30_30: '_img_loading_30_30',
+        };
+
+        var alertTypes = {
+            success: 'success',
+            warning: 'warning',
+            danger: 'danger',
+            info: 'info',
+        };
+
+        var helpers = {
+            getAlert: function(message, alertType) {
+                switch (alertType) {
+                case alertTypes.success:
+                    return $('#' + containers.alertSuccess).clone().html(message);
+                case alertTypes.warning:
+                    return $('#' + containers.alertWarning).clone().html(message);
+                case alertTypes.danger:
+                    return $('#' + containers.alertDanger).clone().html(message);
+                case alertTypes.info:
+                default:
+                    return $('#' + containers.alertInfo).clone().html(message);
+                }
+            },
+            getText: function (message, alertType) {
+                switch (alertType) {
+                    case alertTypes.success:
+                        return $('#' + containers.textSuccess).clone().html(message);
+                    case alertTypes.warning:
+                        return $('#' + containers.texttWarning).clone().html(message);
+                    case alertTypes.danger:
+                        return $('#' + containers.textDanger).clone().html(message);
+                    case alertTypes.info:
+                    default:
+                        return $('#' + containers.textInfo).clone().html(message);
+                }
+            }
+        };
+
+        var notifyOnJob = function (job) {
+            var html;
+            var msgsContainerId = null;
+            var jobCompleted = false;
+            var actionId;
+
+            if (job.isJobCompleted===true)
+            {
+                html = helpers.getText(messages.JobCompleted, alertTypes.success);
+                jobCompleted = true;
+            }
+            else{
+                html = helpers.getText(messages.jobsQueued, alertTypes.info);
+                html = html.add($('#'+images.loading30_30).clone());
+            }
+
+            switch (job.clientJobId) {
+                case constants.pizzaJobKey:
+                    msgsContainerId = messageBoxes.cookPizzaActionMessage;
+                    actionId = actions.cookPizza;
+                    break;
+                case constants.bookFlightJobKey:
+                    msgsContainerId = messageBoxes.bookFlightActionMessage;
+                    actionId = actions.bookFlight;
+                    break;
+                default:
+                    break;
+            }
+            if (msgsContainerId && html) {
+                $('#' + msgsContainerId).html(html);
+            }
+
+            if (actionId) {
+                $('#' + actionId).prop('disabled', !jobCompleted);
+            }
+        };
+
+        var doPoll = function () {
+
+            if (turnOnPolling === false) return;
+
+            var html = '';
+            $.ajax({
+                url: '@Url.Action("PollJobStatus")'
+            }).success(function (data) {
+                switch (data.status) {
+                case constants.jobInProgress:
+                case constants.allJobsCompleted:
+                        $(data.result).each(function (key, job) {
+                            var message = 'Name: ' + job.name
+                                + ', Started On: ' + job.startedOn
+                                + ', Completed: ' + job.isJobCompleted
+                                + ', Completed On: ' + job.completedOn;
+                            if (job.isJobCompleted === true)
+                                html = $(html).add(helpers.getAlert(message, alertTypes.success));
+                            else
+                                html = $(html).add(helpers.getAlert(message, alertTypes.info));
+
+                            notifyOnJob(job);
+                        });
+                    break;
+                case constants.jobsNotFound:
+                        html = $(html).add(helpers.getAlert(messages.NoJobsRunning, alertTypes.warning));
+                    break;
+                default:
+                    break;
+                }
+
+                continuePoll = data.status === constants.jobInProgress;
+
+            }).fail(function(xhr, error) {
+                html = $(html).add(helpers.getAlert(messages.ErrorPollingJob, alertTypes.danger));
+                continuePoll = false;
+            }).always(function() {
+                $('#' + containers.jobs).html(html);
+            });
+
+            if (continuePoll === true) {
+                setTimeout(doPoll, pollingDelay);
+            }
+        };
+
+        var triggerJob = function (endPoint, msgsContainerId, source) {
+            $(source.target).prop('disabled', true);
+            var html = '';
+            $.ajax({
+                    url: endPoint,
+                    method: 'GET'
+                })
+                .success(function(data) {
+                    html = helpers.getText(data.message, alertTypes.info);
+                    switch (data.status) {
+                    case constants.jobInProgress:
+                    case constants.jobQueuedForProcessing:
+                        if (continuePoll === false) {
+                            continuePoll = true;
+                            doPoll();
+                        }
+                        break;
+                    default:
+                        break;
+                    }
+                })
+                .fail(function(xhr, error) {
+                    html = helpers.getText(messages.ErrorQueuingJob, alertTypes.danger);
+                }).always(function() {
+                    $('#' + msgsContainerId).html(html);
+                });
+        };
+
+        $(document).ready(function() {
+            doPoll();
+            //cook pizza
+            $('#'+actions.cookPizza).on('click',
+                function(source) {
+                    triggerJob('@Url.Action("CookPizza")', messageBoxes.cookPizzaActionMessage, source);
+                });
+
+            //book flight
+            $('#' + actions.bookFlight).on('click',
+                function(source) {
+                    triggerJob('@Url.Action("BookFlight")', messageBoxes.bookFlightActionMessage, source);
+                });
+        });
+
+    </script>
+}

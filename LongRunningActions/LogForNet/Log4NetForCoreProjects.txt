@@ -1,0 +1,183 @@
+﻿http://dotnetthoughts.net/how-to-use-log4net-with-aspnetcore-for-logging/
+
+This post is about using Log4Net with ASP.NET Core for implementing logging. The Apache log4net library is a tool to help the programmer output log statements to a variety of output targets. log4net is a port of the excellent Apache log4j™ framework to the Microsoft® .NET runtime. We have kept the framework similar in spirit to the original log4j while taking advantage of new features in the .NET runtime.
+First you need to add the reference of log4net libarary in project.json file. I am using "log4net":"2.0.7". Now you can write code using log4net. I am writing the code in Program.cs file. Unline ASP.NET, log4net doesn’t support the attribute for loading the configuration, so you need to load the configuration manually. Here is a sample log4net configuration file I am using, which will log in a file using FileAppender. I am logging all the information. You can find more information about logging providers and levels in the log4net documentation.
+<?xml version="1.0" encoding="utf-8" ?>
+<log4net>
+  <appender name="RollingFile" type="log4net.Appender.FileAppender">
+    <file value="C:\Temp\app.log" />
+    <layout type="log4net.Layout.PatternLayout">
+      <conversionPattern value="%-5p %d{hh:mm:ss} %message%newline" />
+    </layout>
+  </appender>
+   <root>
+    <level value="ALL" />
+    <appender-ref ref="RollingFile" />
+  </root>
+</log4net>
+Here is the program.cs file, which gets an instance of the ILog object and the configuration is loaded manually.
+public class Program
+{
+    private static readonly log4net.ILog log =
+        log4net.LogManager.GetLogger(typeof(Program));
+    public static void Main(string[] args)
+    {
+        XmlDocument log4netConfig = new XmlDocument();
+        log4netConfig.Load(File.OpenRead("log4net.config"));
+
+        var repo = log4net.LogManager.CreateRepository(
+            Assembly.GetEntryAssembly(), typeof(log4net.Repository.Hierarchy.Hierarchy));
+
+        log4net.Config.XmlConfigurator.Configure(repo, log4netConfig["log4net"]);
+
+        log.Info("Application - Main is invoked");
+        //Lines removed for brevity     }
+}
+The log4net.config file added in the root folder. Now you can run the application, and you see a file with name app.log created in the C:\temp folder. If you look into that you will see only the information we logged is added. But if you want something similar to the ASP.NET Core logging, you need to implement the provider and extension methods yourself.
+Here is the implementation, which helps you to log similar to the existing ASP.NET Core logging implementations.
+Firstly you need to implement the ILogger interface with Log4Net library. Here is the implementation.
+public class Log4NetLogger : ILogger
+{
+    private readonly string _name;
+    private readonly XmlElement _xmlElement;
+    private readonly ILog _log;
+    private ILoggerRepository _loggerRepository;
+    public Log4NetLogger(string name, XmlElement xmlElement)
+    {
+        _name = name;
+        _xmlElement = xmlElement;
+        _loggerRepository = log4net.LogManager.CreateRepository(
+            Assembly.GetEntryAssembly(), typeof(log4net.Repository.Hierarchy.Hierarchy));
+        _log = LogManager.GetLogger(_loggerRepository.Name, name);
+        log4net.Config.XmlConfigurator.Configure(_loggerRepository, xmlElement);
+    }
+    public IDisposable BeginScope<TState>(TState state)
+    {
+        return null;
+    }
+
+    public bool IsEnabled(LogLevel logLevel)
+    {
+        switch (logLevel)
+        {
+            case LogLevel.Critical:
+                return _log.IsFatalEnabled;
+            case LogLevel.Debug:
+            case LogLevel.Trace:
+                return _log.IsDebugEnabled;
+            case LogLevel.Error:
+                return _log.IsErrorEnabled;
+            case LogLevel.Information:
+                return _log.IsInfoEnabled;
+            case LogLevel.Warning:
+                return _log.IsWarnEnabled;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(logLevel));
+        }
+    }
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, 
+        Exception exception, Func<TState, Exception, string> formatter)
+    {
+        if (!IsEnabled(logLevel))
+        {
+            return;
+        }
+
+        if (formatter == null)
+        {
+            throw new ArgumentNullException(nameof(formatter));
+        }
+        string message = null;
+        if (null != formatter)
+        {
+            message = formatter(state, exception);
+        }
+        if (!string.IsNullOrEmpty(message) || exception != null)
+        {
+            switch (logLevel)
+            {
+                case LogLevel.Critical:
+                    _log.Fatal(message);
+                    break;
+                case LogLevel.Debug:
+                case LogLevel.Trace:
+                    _log.Debug(message);
+                    break;
+                case LogLevel.Error:
+                    _log.Error(message);
+                    break;
+                case LogLevel.Information:
+                    _log.Info(message);
+                    break;
+                case LogLevel.Warning:
+                    _log.Warn(message);
+                    break;
+                default:
+                    _log.Warn($"Encountered unknown log level {logLevel}, writing out as Info.");
+                    _log.Info(message, exception);
+                    break;
+            }
+        }
+    }
+}
+And this logger need to be provided to the logger factory extension using ILoggerProvider implementation. Here is the ILoggerProvider implementation. Most of the code I took from the console logger provider implementation from ASP.NET Core implementation. The configuration parsing is implemented inside this class.
+public class Log4NetProvider : ILoggerProvider
+{
+    private readonly string _log4NetConfigFile;
+    private readonly ConcurrentDictionary<string, Log4NetLogger> _loggers =
+        new ConcurrentDictionary<string, Log4NetLogger>();
+    public Log4NetProvider(string log4NetConfigFile)
+    {
+        _log4NetConfigFile = log4NetConfigFile;
+    }
+
+    public ILogger CreateLogger(string categoryName)
+    {
+        return _loggers.GetOrAdd(categoryName, CreateLoggerImplementation);
+    }
+
+    public void Dispose()
+    {
+        _loggers.Clear();
+    }
+    private Log4NetLogger CreateLoggerImplementation(string name)
+    {
+        return new Log4NetLogger(name, Parselog4NetConfigFile(_log4NetConfigFile));
+    }
+
+    private static XmlElement Parselog4NetConfigFile(string filename)
+    {
+        XmlDocument log4netConfig = new XmlDocument();
+        log4netConfig.Load(File.OpenRead(filename));
+        return log4netConfig["log4net"];
+    }
+}
+Finally you need ILoggerFactory extension methods, which helps to add Log4Net to the logger factory. Here is the extension method implementation.
+public static class Log4netExtensions
+{
+    public static ILoggerFactory AddLog4Net(this ILoggerFactory factory, string log4NetConfigFile)
+    {
+        factory.AddProvider(new Log4NetProvider(log4NetConfigFile));
+        return factory;
+    }
+
+    public static ILoggerFactory AddLog4Net(this ILoggerFactory factory)
+    {
+        factory.AddProvider(new Log4NetProvider("log4net.config"));
+        return factory;
+    }
+}
+And you can use this inside Configure() method.
+public void Configure(IApplicationBuilder app,
+    IHostingEnvironment env, ILoggerFactory loggerFactory)
+{
+    loggerFactory.AddLog4Net();
+
+    if (env.IsDevelopment())
+    {
+        app.UseDeveloperExceptionPage();
+    }
+    app.UseMvcWithDefaultRoute();
+}
+Now you can run the app again and you can see the log file filled with lot of logging details.
