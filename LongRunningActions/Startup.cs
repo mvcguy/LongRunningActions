@@ -32,7 +32,7 @@ namespace LongRunningActions
 
             // Adds a default in-memory implementation of IDistributedCache.
             services.AddDistributedMemoryCache();
-            
+
             services.AddSession(options =>
             {
                 options.CookieHttpOnly = true;
@@ -41,9 +41,16 @@ namespace LongRunningActions
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public void Configure(IApplicationBuilder app, IHostingEnvironment env, ILoggerFactory loggerFactory)
+        public void Configure(IApplicationBuilder app,
+            IHostingEnvironment env,
+            ILoggerFactory loggerFactory,
+            ILongProcessService longProcessService,
+            IApplicationLifetime applicationLifetime)
         {
             loggerFactory.AddLog4Net();
+            longProcessService.StartSchedular();
+
+            applicationLifetime.ApplicationStopped.Register(longProcessService.StopSchedular);
 
             if (env.IsDevelopment())
             {
@@ -54,7 +61,7 @@ namespace LongRunningActions
             {
                 app.UseExceptionHandler("/Home/Error");
             }
-
+            
             app.UseStaticFiles();
             app.UseSession();
             app.UseMvc(routes =>

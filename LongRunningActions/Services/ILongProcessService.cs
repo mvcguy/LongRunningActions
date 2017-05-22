@@ -1,7 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace LongRunningActions.Services
 {
@@ -9,8 +7,16 @@ namespace LongRunningActions.Services
     {
         void QueueJobs(params LongRunningJob[] longRunningJobs);
 
-        Task StartSchedularTask(CancellationToken cancellationToken);
-
         IEnumerable<LongRunningJob> GetJobsInfo(params string[] jobIds);
+
+        void StartSchedular();
+
+
+        /// <summary>
+        /// This will stop the schedular task, any jobs queued afterwards will not be scheduled for execution.
+        /// but this does not mean that tasks which are already scheduled are also aborted.
+        /// they will continue executing even the schedular is down.
+        /// </summary>
+        void StopSchedular();
     }
 }

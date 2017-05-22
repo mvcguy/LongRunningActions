@@ -21,7 +21,6 @@ namespace LongRunningActions.Services
 
         private readonly CancellationTokenSource _cancellationTokenSource;
 
-        // ReSharper disable once PrivateFieldCanBeConvertedToLocalVariable
         private readonly CancellationToken _cancellationToken;
 
         public bool IsSchedularRunning { get; private set; }
@@ -31,14 +30,12 @@ namespace LongRunningActions.Services
         public LongProcessService(ILoggerFactory loggerFactory)
         {
             _logger = loggerFactory.CreateLogger<LongProcessService>();
-
             _jobQueue = new ConcurrentQueue<LongRunningJob>();
             _tasks = new ConcurrentDictionary<string, Task>();
             _jobsHistory = new ConcurrentDictionary<string, LongRunningJob>();
 
             _cancellationTokenSource = new CancellationTokenSource();
             _cancellationToken = _cancellationTokenSource.Token;
-            StartSchedularTask(_cancellationToken);
         }
 
         public void QueueJobs(params LongRunningJob[] longRunningJobs)
@@ -61,39 +58,50 @@ namespace LongRunningActions.Services
         {
             if (IsSchedularRunning) return _schedularTask;
 
-            _schedularTask = Task.Factory.StartNew(() =>
+            _schedularTask = Task.Factory.StartNew(async () =>
               {
-                  cancellationToken.ThrowIfCancellationRequested();
-
-                  while (true)
+                  try
                   {
-                      if (cancellationToken.IsCancellationRequested)
+                      cancellationToken.ThrowIfCancellationRequested();
+                      while (true)
                       {
-                          cancellationToken.ThrowIfCancellationRequested();
-                      }
+                          if (_jobQueue.Count > 0)
+                          {
+                              try
+                              {
+                                  OnJobArrived();
+                              }
+                              catch (Exception e)
+                              {
+                                  _logger.LogError(e.Message);
+                              }
+                          }
+                          else
+                          {
+                              //_logger.LogDebug("No longRunningJobs to process, taking a nap...");
+                          }
 
-                      if (_jobQueue.Count > 0)
+                          //take a nap between iterations
+                          cancellationToken.ThrowIfCancellationRequested();
+                          await Task.Delay(5000, cancellationToken);
+                      }
+                  }
+                  catch (Exception exception)
+                  {
+                      if (exception is TaskCanceledException || exception is OperationCanceledException)
                       {
-                          try
-                          {
-                              OnJobArrived();
-                          }
-                          catch (Exception e)
-                          {
-                              _logger.LogError(e.Message);
-                          }
+                          _logger.LogWarning(new EventId(401), exception, "Schedular task is cancelled.");
                       }
                       else
                       {
-                          //_logger.LogDebug("No longRunningJobs to process, taking a nap...");
+                          _logger.LogCritical(new EventId(500), exception, "Schedular is stopped due to unexpected error.");
                       }
-
-                      //take a nap between iterations
-                      Thread.Sleep(5000);
                   }
                   // ReSharper disable once FunctionNeverReturns
               }, cancellationToken);
+
             IsSchedularRunning = true;
+
             return _schedularTask;
         }
 
@@ -106,6 +114,27 @@ namespace LongRunningActions.Services
                 {
                     yield return job;
                 }
+            }
+        }
+
+        public void StartSchedular()
+        {
+            _logger.LogInformation("Schedular is being started...");
+            StartSchedularTask(_cancellationToken);
+        }
+
+        public void StopSchedular()
+        {
+            try
+            {
+                _logger.LogInformation("Schedular is being stopped, please wait...");
+                _cancellationTokenSource?.Cancel();
+                _schedularTask?.Wait();
+            }
+            catch (AggregateException aggregateException)
+            {
+                foreach (var innerException in aggregateException.InnerExceptions)
+                    _logger.LogWarning("Schedular is stopped: " + aggregateException.Message + " " + innerException.Message);
             }
         }
 
