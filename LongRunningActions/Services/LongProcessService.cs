@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace LongRunningActions.Services
 {
@@ -15,8 +16,6 @@ namespace LongRunningActions.Services
 
         private readonly ConcurrentDictionary<string, LongRunningJob> _jobsHistory;
 
-        private const int MaxTasks = 3;
-
         private Task _schedularTask;
 
         private readonly CancellationTokenSource _cancellationTokenSource;
@@ -27,15 +26,23 @@ namespace LongRunningActions.Services
 
         private readonly ILogger<LongProcessService> _logger;
 
-        public LongProcessService(ILoggerFactory loggerFactory)
+        private readonly LongRunningServiceOptions _options;
+
+        private const string ServiceName = "Long running jobs schedular";
+        
+        public LongProcessService(ILoggerFactory loggerFactory, IOptions<LongRunningServiceOptions> options)
         {
             _logger = loggerFactory.CreateLogger<LongProcessService>();
             _jobQueue = new ConcurrentQueue<LongRunningJob>();
             _tasks = new ConcurrentDictionary<string, Task>();
             _jobsHistory = new ConcurrentDictionary<string, LongRunningJob>();
-
             _cancellationTokenSource = new CancellationTokenSource();
             _cancellationToken = _cancellationTokenSource.Token;
+            _options = options?.Value ?? new LongRunningServiceOptions { MaxNumberOfTasks = 15 };
+            if (_options.MaxNumberOfTasks <= 0)
+            {
+                _options.MaxNumberOfTasks = 15;
+            }
         }
 
         public void QueueJobs(params LongRunningJob[] longRunningJobs)
@@ -90,17 +97,19 @@ namespace LongRunningActions.Services
                   {
                       if (exception is TaskCanceledException || exception is OperationCanceledException)
                       {
-                          _logger.LogWarning(new EventId(401), exception, "Schedular task is cancelled.");
+                          _logger.LogWarning(new EventId(401), exception, $"{ServiceName} is cancelled.");
                       }
                       else
                       {
-                          _logger.LogCritical(new EventId(500), exception, "Schedular is stopped due to unexpected error.");
+                          _logger.LogCritical(new EventId(500), exception, $"{ServiceName} is stopped due to unexpected error.");
                       }
                   }
                   // ReSharper disable once FunctionNeverReturns
               }, cancellationToken);
 
             IsSchedularRunning = true;
+
+            _logger.LogInformation($"{ServiceName} is started");
 
             return _schedularTask;
         }
@@ -119,7 +128,7 @@ namespace LongRunningActions.Services
 
         public void StartSchedular()
         {
-            _logger.LogInformation("Schedular is being started...");
+            _logger.LogInformation($"{ServiceName} is being started...");
             StartSchedularTask(_cancellationToken);
         }
 
@@ -127,22 +136,21 @@ namespace LongRunningActions.Services
         {
             try
             {
-                _logger.LogInformation("Schedular is being stopped, please wait...");
                 _cancellationTokenSource?.Cancel();
                 _schedularTask?.Wait();
             }
             catch (AggregateException aggregateException)
             {
                 foreach (var innerException in aggregateException.InnerExceptions)
-                    _logger.LogWarning("Schedular is stopped: " + aggregateException.Message + " " + innerException.Message);
+                    _logger.LogWarning($"{ServiceName} is stopped: " + aggregateException.Message + " " + innerException.Message);
             }
         }
 
         private void OnJobArrived()
         {
-            if (_tasks.Count >= MaxTasks)
+            if (_tasks.Count >= _options.MaxNumberOfTasks)
             {
-                _logger.LogWarning("Task cannot run now. waiting....");
+                _logger.LogWarning("Max number of tasks reached. Task cannot run now, waiting for its turn to be scheduled");
                 return;
             }
 
@@ -222,7 +230,7 @@ namespace LongRunningActions.Services
             catch (AggregateException aggregateException)
             {
                 foreach (var innerException in aggregateException.InnerExceptions)
-                    _logger.LogWarning("Disposing SchedularTask: " + aggregateException.Message + " " + innerException.Message);
+                    _logger.LogWarning($"GC: {ServiceName}: " + aggregateException.Message + " " + innerException.Message);
             }
             finally
             {

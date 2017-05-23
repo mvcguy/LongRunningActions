@@ -28,7 +28,10 @@ namespace LongRunningActions
             // Add framework services.
             services.AddMvc();
 
-            services.AddSingleton<ILongProcessService, LongProcessService>();
+            services.AddLongRunningJobService(options =>
+            {
+                options.MaxNumberOfTasks = 20;
+            });
 
             // Adds a default in-memory implementation of IDistributedCache.
             services.AddDistributedMemoryCache();
@@ -44,14 +47,13 @@ namespace LongRunningActions
         public void Configure(IApplicationBuilder app,
             IHostingEnvironment env,
             ILoggerFactory loggerFactory,
-            ILongProcessService longProcessService,
+            ILongProcessService longRunningJobService,
             IApplicationLifetime applicationLifetime)
         {
             loggerFactory.AddLog4Net();
-            longProcessService.StartSchedular();
 
-            applicationLifetime.ApplicationStopped.Register(longProcessService.StopSchedular);
-
+            longRunningJobService.StartSchedular();
+            
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
@@ -61,7 +63,7 @@ namespace LongRunningActions
             {
                 app.UseExceptionHandler("/Home/Error");
             }
-            
+
             app.UseStaticFiles();
             app.UseSession();
             app.UseMvc(routes =>
