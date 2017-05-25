@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 
 namespace LongRunningActions.Services
 {
@@ -7,6 +8,7 @@ namespace LongRunningActions.Services
         private bool _isJobCompleted;
         private bool _isJobStarted;
         private bool _isJobCompletedWithError;
+        private bool _isJobCancelled;
 
 
         public LongRunningJob()
@@ -16,18 +18,31 @@ namespace LongRunningActions.Services
         }
 
         public string JobId { get; internal set; }
-
+        
         public string ClientJobId { get; set; }
 
         public string Name { get; set; }
 
-        public Action<LongRunningJob> Execute { get; set; }
+        /// <summary>
+        /// The main logic of the job should be go here. Use the cancellation token
+        /// if the job might need to be cancelled.
+        /// </summary>
+        public Action<LongRunningJob, CancellationToken> Execute { get; set; }
 
-        public Action<LongRunningJob> Success { get; set; }
+        /// <summary>
+        /// This action will be called when the <see cref="Execute"/> is completed successfully
+        /// </summary>
+        public Action<LongRunningJob, CancellationToken> Success { get; set; }
 
-        public Action<LongRunningJob> Always { get; set; }
+        /// <summary>
+        /// This action will called be called always after a job is executed
+        /// </summary>
+        public Action<LongRunningJob, CancellationToken> Always { get; set; }
 
-        public Action<Exception> Fail { get; set; }
+        /// <summary>
+        /// This action will be called when the job has encountered exception during execution.
+        /// </summary>
+        public Action<Exception, CancellationToken> Fail { get; set; }
 
         public bool IsJobCompleted
         {
@@ -59,6 +74,16 @@ namespace LongRunningActions.Services
             }
         }
 
+        public bool IsJobCancelled
+        {
+            get => _isJobCancelled;
+            internal set
+            {
+                _isJobCancelled = value;
+                LastUpdatedOn = DateTime.Now;
+            }
+        }
+
         public Exception Error { get; internal set; }
 
         public DateTime? CreatedOn { get; internal set; }
@@ -68,6 +93,8 @@ namespace LongRunningActions.Services
         public DateTime? CompletedOn { get; internal set; }
 
         public DateTime? LastUpdatedOn { get; internal set; }
+
+        public CancellationTokenSource CancellationTokenSource { get; internal set; }
 
     }
 }

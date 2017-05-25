@@ -82,7 +82,7 @@ namespace LongRunningActions.Controllers
 
             _longProcessService.QueueJobs(job);
 
-            return Json(new { Status = Constants.JobQueuedForProcessing, Message = Messages.JobsQueued});
+            return Json(new { Status = Constants.JobQueuedForProcessing, Message = Messages.JobsQueued });
         }
 
         public IActionResult PollJobStatus()
@@ -100,6 +100,19 @@ namespace LongRunningActions.Controllers
             var status = jobs.All(x => x.IsJobCompleted) ? Constants.AllJobsCompleted : Constants.JobInProgress;
 
             return Json(new { Status = status, Message = "", result = jobs });
+        }
+
+        public IActionResult CancelJob(string jobId)
+        {
+            if (string.IsNullOrWhiteSpace(jobId) || Guid.TryParse(jobId, out Guid jobGuid))
+            {
+                return Json(new { Status = Constants.JobsNotFound, Message = Messages.NoJobsFound, result = new object[] { } });
+            }
+
+            var cancellationResult = _longProcessService.CancelJob(jobGuid.ToString());
+
+            //TODO: needs a user action on the screen.
+            return null;
         }
 
         private void UpdateJobStatus(string key, IEnumerable<string> value)
@@ -133,7 +146,7 @@ namespace LongRunningActions.Controllers
                 };
             }
         }
-        
+
         public IActionResult About()
         {
             ViewData["Message"] = "Your application description page.";
@@ -161,12 +174,18 @@ namespace LongRunningActions.Controllers
                 {
                     ClientJobId = PizzaJobKey,
                     Name = "Cook Pizza",
-                    Execute = (job) =>
+                    Execute = (job, cancellationToken) =>
                     {
-                        _logger.LogInformation("Cooking pizza...");
+                        _logger.LogInformation("Preparing pizza...");
+                        cancellationToken.ThrowIfCancellationRequested();
                         Thread.Sleep(new TimeSpan(0, 0, 10));
+
+                        _logger.LogInformation("Cooking pizza...");
+                        cancellationToken.ThrowIfCancellationRequested();
+                        Thread.Sleep(new TimeSpan(0, 0, 10));
+
                     },
-                    Success = (job) =>
+                    Success = (job, cancellationToken) =>
                     {
                         _logger.LogInformation($"Pizza is cooked with token Id: {job.JobId}");
                     }
@@ -182,12 +201,17 @@ namespace LongRunningActions.Controllers
                 {
                     ClientJobId = BookFlightJobKey,
                     Name = "Book Flight",
-                    Execute = (job) =>
+                    Execute = (job, cancellationToken) =>
                     {
-                        _logger.LogInformation("Booking Flight...");
+                        _logger.LogInformation("Connecting to portal...");
+                        cancellationToken.ThrowIfCancellationRequested();
                         Thread.Sleep(new TimeSpan(0, 0, 10));
+
+                        _logger.LogInformation("Booking flight...");
+                        cancellationToken.ThrowIfCancellationRequested();
+                        Thread.Sleep(new TimeSpan(0,0,20));
                     },
-                    Success = (job) =>
+                    Success = (job, cancellationToken) =>
                     {
                         _logger.LogInformation($"Flight is booked with token Id: {job.JobId}");
                     }

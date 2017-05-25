@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -29,7 +30,7 @@ namespace LongRunningActions.Services
         private readonly LongRunningServiceOptions _options;
 
         private const string ServiceName = "Long running jobs schedular";
-        
+
         public LongProcessService(ILoggerFactory loggerFactory, IOptions<LongRunningServiceOptions> options)
         {
             _logger = loggerFactory.CreateLogger<LongProcessService>();
@@ -56,6 +57,7 @@ namespace LongRunningActions.Services
                     job.JobId = Guid.NewGuid().ToString();
                 }
                 _jobQueue.Enqueue(job);
+                _logger.LogInformation($"New job with id {job.JobId} is queued for processing.");
                 _jobsHistory.TryAdd(job.JobId, job);
             }
 
@@ -146,6 +148,58 @@ namespace LongRunningActions.Services
             }
         }
 
+        public JobCancellationResult CancelJob(string jobGuid)
+        {
+            _logger.LogWarning($"Cancellation is requested for job with Id: {jobGuid}");
+
+            _jobsHistory.TryGetValue(jobGuid, out LongRunningJob job);
+
+            var result = new JobCancellationResult
+            {
+                Job = job,
+                JobId = jobGuid
+            };
+
+            if (job == null)
+            {
+                result.Message = $"Job with id {jobGuid} cannot be found";
+                result.JobCancellationStatus = JobCancellationStatus.JobNotFound;
+            }
+
+            else if (job.IsJobCompleted)
+            {
+                result.Message = $"Job with id {jobGuid} was already completed, and thus cannot be cancelled";
+                result.JobCancellationStatus = JobCancellationStatus.JobIsAlreadyCompleted;
+            }
+
+            //prevent the job from scheduling, if its not started already.
+            else if (!(job.IsJobCancelled || job.IsJobStarted))
+            {
+                job.IsJobCancelled = true;
+
+                result.Message = $"Job with id {jobGuid} was cancelled. Job was not started when it was cancelled.";
+                result.JobCancellationStatus = JobCancellationStatus.JobCancelled;
+            }
+
+            else
+            {
+                _tasks.TryGetValue(jobGuid, out Task task);
+
+                try
+                {
+                    Debug.Assert(task != null, "task != null");
+                    job.CancellationTokenSource.Cancel();
+                    task.Wait();
+                }
+                catch (Exception exception)
+                {
+                    if (exception is TaskCanceledException || exception is OperationCanceledException)
+                        job.IsJobCancelled = true;
+                }
+            }
+            return result;
+        }
+
         private void OnJobArrived()
         {
             if (_tasks.Count >= _options.MaxNumberOfTasks)
@@ -156,23 +210,38 @@ namespace LongRunningActions.Services
 
             if (!_jobQueue.TryDequeue(out LongRunningJob job)) return;
 
+            if (job.IsJobCancelled) return;
+
+            var token = job.CancellationTokenSource.Token;
+
+            if (token.IsCancellationRequested)
+            {
+                job.IsJobCancelled = true;
+                return;
+            }
+
             var task = new Task<string>(() =>
             {
+                var jobCancelled = false;
+
                 try
                 {
                     job.IsJobStarted = true;
                     job.StartedOn = DateTime.Now;
                     _logger.LogInformation($"Job '{job.JobId}' is started...");
-                    job.Execute?.Invoke(job);
-
+                    job.Execute?.Invoke(job, token);
                     //invoke success safely
                     try
                     {
                         _logger.LogInformation($"Job '{job.JobId}' is successfully completed...");
                         job.CompletedOn = DateTime.Now;
-                        job.Success?.Invoke(job);
+                        job.Success?.Invoke(job, token);
                     }
-                    catch {/* ignored*/}
+                    catch (Exception exception)
+                    {
+                        if (exception is TaskCanceledException || exception is OperationCanceledException)
+                            jobCancelled = true;
+                    }
                     finally
                     {
                         job.IsJobCompleted = true;
@@ -182,12 +251,19 @@ namespace LongRunningActions.Services
                 catch (Exception e)
                 {
                     //invoke fail safely
+                    if (e is TaskCanceledException || e is OperationCanceledException)
+                        jobCancelled = true;
+
                     try
                     {
                         job.CompletedOn = DateTime.Now;
-                        job.Fail?.Invoke(e);
+                        job.Fail?.Invoke(e, token);
                     }
-                    catch {/* ignored*/}
+                    catch (Exception exception)
+                    {
+                        if (exception is TaskCanceledException || exception is OperationCanceledException)
+                            jobCancelled = true;
+                    }
                     finally
                     {
                         job.IsJobCompleted = true;
@@ -198,10 +274,15 @@ namespace LongRunningActions.Services
                 finally
                 {
                     //invoke Always safely
-                    try { job.Always?.Invoke(job); }
-                    catch {/*ignored*/ }
-                }
+                    try { job.Always?.Invoke(job, token); }
+                    catch (Exception exception)
+                    {
+                        if (exception is TaskCanceledException || exception is OperationCanceledException)
+                            jobCancelled = true;
+                    }
 
+                    job.IsJobCancelled = jobCancelled;
+                }
                 return job.JobId;
             });
 
@@ -210,7 +291,7 @@ namespace LongRunningActions.Services
                 //when task is compelted remove it from the task list.
                 // ReSharper disable once UnusedVariable
                 _tasks.TryRemove(task1.Result, out Task rrr);
-            });
+            }, token);
 
             _tasks.TryAdd(job.JobId, task);
             task.Start();

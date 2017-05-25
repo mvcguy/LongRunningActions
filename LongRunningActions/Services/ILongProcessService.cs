@@ -18,5 +18,7 @@ namespace LongRunningActions.Services
         /// they will continue executing even the schedular is down.
         /// </summary>
         void StopSchedular();
+
+        JobCancellationResult CancelJob(string jobGuid);
     }
 }
