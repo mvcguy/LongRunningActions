@@ -24,24 +24,26 @@
 <h1>Background tasks</h1>
 
 <div class="row">
-    
+
     <div class="col-md-6">
         <h3>Click here to cook some fresh pizza.</h3>
         <p>Usually this will take around 20 seconds to complete</p>
-        <button id="_cook_pizza" class="btn btn-primary">Cook Pizza</button>
-        <br/>
+        <button id="_cook_pizza" class="btn btn-primary" data-cancel-action="_cook_pizza_cancel">Cook Pizza</button>
+        <button id="_cook_pizza_cancel" class="btn btn-danger" disabled="disabled">Cancel</button>
+        <br />
         <div id="_pizza_action_message"></div>
     </div>
-    
+
     <div class="col-md-6">
         <h3>Press book flight to initiate the booking process.</h3>
         <p>Once a task is started, you cannot click the button again. You have to wait for it to finish.</p>
-        <button id="_book_flight" class="btn btn-primary">Book Flight</button>
-        <br/>
+        <button id="_book_flight" class="btn btn-primary" data-cancel-action="_book_flight_cancel">Book Flight</button>
+        <button id="_book_flight_cancel" class="btn btn-danger" disabled="disabled">Cancel</button>
+        <br />
         <div id="_flight_action_message"></div>
     </div>
 </div>
-<div style="display: none; width: 0px; height: 0px; padding: 0px; margin: 0px;">
+<div style="display: none; width: 0; height: 0; padding: 0; margin: 0;">
     <div class="alert alert-success" id="_alert_success"></div>
     <div class="alert alert-warning" id="_alert_warning"></div>
     <div class="alert alert-danger" id="_alert_danger"></div>
@@ -69,6 +71,7 @@
             JobCompleted: 'Job completed. Click to start again!',
             jobsInProgress: 'Jobs are still being processed. Please wait...',
             jobsQueued: 'Jobs queued for processing',
+            jobCancelled:'Job is cancelled.'
         };
 
         var constants = {
@@ -83,7 +86,9 @@
 
         var actions = {
             bookFlight: '_book_flight',
+            cancelFlightBooking:'_book_flight_cancel',
             cookPizza: '_cook_pizza',
+            cancelPizzaCooking:'_cook_pizza_cancel',
         };
 
         var messageBoxes = {
@@ -129,19 +134,30 @@
                     return $('#' + containers.alertInfo).clone().html(message);
                 }
             },
-            getText: function (message, alertType) {
+            getText: function(message, alertType) {
                 switch (alertType) {
-                    case alertTypes.success:
-                        return $('#' + containers.textSuccess).clone().html(message);
-                    case alertTypes.warning:
-                        return $('#' + containers.texttWarning).clone().html(message);
-                    case alertTypes.danger:
-                        return $('#' + containers.textDanger).clone().html(message);
-                    case alertTypes.info:
-                    default:
-                        return $('#' + containers.textInfo).clone().html(message);
+                case alertTypes.success:
+                    return $('#' + containers.textSuccess).clone().html(message);
+                case alertTypes.warning:
+                    return $('#' + containers.texttWarning).clone().html(message);
+                case alertTypes.danger:
+                    return $('#' + containers.textDanger).clone().html(message);
+                case alertTypes.info:
+                default:
+                    return $('#' + containers.textInfo).clone().html(message);
                 }
-            }
+            },
+            setJobId: function (object, jobId) {
+                //https://stackoverflow.com/questions/4191386/jquery-how-to-find-an-element-based-on-a-data-attribute-value
+                //Notice that it doesn't work for elements where you set data with $('#element').data('some-att-name', value);
+                //but only for those with hardcoded attribute.
+                //I've got this problem and to make it work set data by writing the attribute directly $('#element').attr('data- some - att - name', value);
+                $(object).attr('data-jobid', jobId);
+            },
+        };
+
+        var notifyJobCancelled = function(job) {
+
         };
 
         var notifyOnJob = function (job) {
@@ -150,12 +166,21 @@
             var jobCompleted = false;
             var actionId;
 
-            if (job.isJobCompleted===true)
+            if (job.isJobCompleted === true)
             {
                 html = helpers.getText(messages.JobCompleted, alertTypes.success);
                 jobCompleted = true;
             }
-            else{
+            else if (job.isJobCancelled === true) {
+                html = helpers.getText(messages.jobCancelled, alertTypes.warning);
+                jobCompleted = true;
+                try {
+                    notifyJobCancelled(job);
+                } catch (e) {}
+
+            }
+            else
+            {
                 html = helpers.getText(messages.jobsQueued, alertTypes.info);
                 html = html.add($('#'+images.loading30_30).clone());
             }
@@ -226,46 +251,109 @@
             }
         };
 
-        var triggerJob = function (endPoint, msgsContainerId, source) {
+        var onJobStarting = function(source) {
             $(source.target).prop('disabled', true);
-            var html = '';
+        };
+
+        var onJobStarted = function (data, msgsContainerId, source) {
+            var html = helpers.getText(data.message, alertTypes.info);
+            helpers.setJobId(source.target, data.jobs[0].jobId);
+            switch (data.status) {
+            case constants.jobInProgress:
+            case constants.jobQueuedForProcessing:
+                var cancelAction = $(source.target).data('cancel-action');
+                $('#' + cancelAction).prop('disabled', false);
+                if (continuePoll === false) {
+                    continuePoll = true;
+                    doPoll();
+                }
+                break;
+            default:
+                break;
+            }
+            $('#' + msgsContainerId).html(html);
+        };
+
+        var onJobStartError = function (xhr, error, msgsContainerId, source) {
+            var html = helpers.getText(messages.ErrorQueuingJob, alertTypes.danger);
+            $('#' + msgsContainerId).html(html);
+        };
+
+        var triggerJob = function (endPoint, msgsContainerId, source) {
+            onJobStarting(source);
             $.ajax({
                     url: endPoint,
                     method: 'GET'
                 })
-                .success(function(data) {
-                    html = helpers.getText(data.message, alertTypes.info);
-                    switch (data.status) {
-                    case constants.jobInProgress:
-                    case constants.jobQueuedForProcessing:
-                        if (continuePoll === false) {
-                            continuePoll = true;
-                            doPoll();
-                        }
-                        break;
-                    default:
-                        break;
-                    }
+                .success(function (data) {
+                    onJobStarted(data, msgsContainerId, source);
                 })
                 .fail(function(xhr, error) {
-                    html = helpers.getText(messages.ErrorQueuingJob, alertTypes.danger);
-                }).always(function() {
-                    $('#' + msgsContainerId).html(html);
+                    onJobStartError(xhr, error, msgsContainerId, source);
                 });
+        };
+
+        var onJobCancelling = function (jobId, source, msgsContainerId) {
+            $(source.target).prop('disabled', true);
+        };
+
+        var onJobCancelled = function (jobId, source, data, msgsContainerId) {
+
+            var action = $("button[data-jobid='" + jobId + "']");
+            action.prop('disabled', false);
+
+            var job = data.result[0].job;
+            if (job && job.isJobCancelled === true) {
+                var html = helpers.getText(messages.jobCancelled, alertTypes.warning);
+                $('#' + msgsContainerId).html(html);
+            }
+        };
+
+        var onJobCancelError = function (xhr, error, jobId, source, msgsContainerId) {
+
+        };
+
+        var triggerJobCancel = function (endPoint, jobId, msgsContainerId, source) {
+            onJobCancelling(jobId, source, msgsContainerId);
+            var request = {
+                url: endPoint,
+                data: { jobId: jobId },
+                method: 'GET'
+            };
+            $.ajax(request).success(function(data) {
+                onJobCancelled(jobId, source, data, msgsContainerId);
+            }).fail(function(xhr, error) {
+                onJobCancelError(xhr, error, jobId, source, msgsContainerId);
+            });
         };
 
         $(document).ready(function() {
             doPoll();
+
             //cook pizza
             $('#'+actions.cookPizza).on('click',
                 function(source) {
                     triggerJob('@Url.Action("CookPizza")', messageBoxes.cookPizzaActionMessage, source);
                 });
 
+            //cancel pizza cooking
+            $('#' + actions.cancelPizzaCooking).on('click',
+                function (source) {
+                    var jobId = $('#' + actions.cookPizza).attr('data-jobid');
+                    triggerJobCancel('@Url.Action("CancelJob")', jobId, messageBoxes.cookPizzaActionMessage, source);
+                });
+
             //book flight
             $('#' + actions.bookFlight).on('click',
                 function(source) {
                     triggerJob('@Url.Action("BookFlight")', messageBoxes.bookFlightActionMessage, source);
+                });
+
+            //cancel flight booking
+            $('#' + actions.cancelFlightBooking).on('click',
+                function (source) {
+                    var jobId = $('#' + actions.bookFlight).attr('data-jobid');
+                    triggerJobCancel('@Url.Action("CancelJob")', jobId, messageBoxes.bookFlightActionMessage, source);
                 });
         });
 

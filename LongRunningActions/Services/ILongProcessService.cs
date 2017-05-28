@@ -5,6 +5,11 @@ namespace LongRunningActions.Services
 {
     public interface ILongProcessService : IDisposable
     {
+        /// <summary>
+        /// Queue the job(s) for execution. Make sure that the job is not queued already for processing. Otherwise you will end up
+        /// running the job multiple times.
+        /// </summary>
+        /// <param name="longRunningJobs"></param>
         void QueueJobs(params LongRunningJob[] longRunningJobs);
 
         IEnumerable<LongRunningJob> GetJobsInfo(params string[] jobIds);

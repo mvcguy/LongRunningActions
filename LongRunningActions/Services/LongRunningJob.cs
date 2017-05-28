@@ -14,6 +14,7 @@ namespace LongRunningActions.Services
         public LongRunningJob()
         {
             JobId = Guid.NewGuid().ToString();
+            CancellationTokenSource = new CancellationTokenSource();
             CreatedOn = DateTime.Now;
         }
 

@@ -32,57 +32,69 @@ namespace LongRunningActions.Controllers
 
         public IActionResult CookPizza()
         {
+            object result;
 
-            if (HttpContext.Session.Keys.Any(x => x == PizzaJobKey))
+            var jobs = GetJobsFromSession(PizzaJobKey).ToList();
+            var previousJobCompleted = jobs.All(x => x.IsJobCompleted);
+
+            if (previousJobCompleted)
             {
-                var jobs = GetJobsFromSession(PizzaJobKey);
+                RemoveJobFromSession(PizzaJobKey);
+                var job = PizzaJob;
+                UpdateJobInSession(PizzaJobKey, new[] { job.JobId });
+                _longProcessService.QueueJobs(job);
 
-                var incomplete = jobs.Any(x => !x.IsJobCompleted);
-
-                if (incomplete)
+                result = new
                 {
-                    return Json(new { Status = Constants.JobInProgress, Message = Messages.JobsInProgress });
-                }
-                else
-                {
-                    HttpContext.Session.Remove(PizzaJobKey);
-                }
+                    Status = Constants.JobQueuedForProcessing,
+                    Message = Messages.JobsQueued,
+                    Jobs = new object[] { ToLongRunningJobDto(job) }
+                };
             }
+            else
+            {
+                result = new
+                {
+                    Status = Constants.JobInProgress,
+                    Message = Messages.JobsInProgress,
+                    Jobs = jobs
+                };
 
-            var job = PizzaJob;
-
-            UpdateJobStatus(PizzaJobKey, new[] { job.JobId });
-
-            _longProcessService.QueueJobs(job);
-
-            return Json(new { Status = Constants.JobQueuedForProcessing, Message = Messages.JobsQueued });
+            }
+            return Json(result);
         }
 
         public IActionResult BookFlight()
         {
-            if (HttpContext.Session.Keys.Any(x => x == BookFlightJobKey))
+            object result;
+
+            var jobs = GetJobsFromSession(BookFlightJobKey).ToList();
+            var previousJobCompleted = jobs.All(x => x.IsJobCompleted);
+
+            if (previousJobCompleted)
             {
-                var jobs = GetJobsFromSession(BookFlightJobKey);
-
-                var incomplete = jobs.Any(x => !x.IsJobCompleted);
-
-                if (incomplete)
+                RemoveJobFromSession(BookFlightJobKey);
+                var job = BookFlightJob;
+                UpdateJobInSession(BookFlightJobKey, new[] { job.JobId });
+                _longProcessService.QueueJobs(job);
+                result = new
                 {
-                    return Json(new { Status = Constants.JobInProgress, Message = Messages.JobsInProgress });
-                }
-                else
-                {
-                    HttpContext.Session.Remove(BookFlightJobKey);
-                }
+                    Status = Constants.JobQueuedForProcessing,
+                    Message = Messages.JobsQueued,
+                    Jobs = new object[] { ToLongRunningJobDto(job) }
+                };
             }
+            else
+            {
+                result = new
+                {
+                    Status = Constants.JobInProgress,
+                    Message = Messages.JobsInProgress,
+                    Jobs = jobs
+                };
 
-            var job = BookFlightJob;
-
-            UpdateJobStatus(BookFlightJobKey, new[] { job.JobId });
-
-            _longProcessService.QueueJobs(job);
-
-            return Json(new { Status = Constants.JobQueuedForProcessing, Message = Messages.JobsQueued });
+            }
+            return Json(result);
         }
 
         public IActionResult PollJobStatus()
@@ -97,32 +109,43 @@ namespace LongRunningActions.Controllers
             jobs.AddRange(GetJobsFromSession(PizzaJobKey).ToList());
             jobs.AddRange(GetJobsFromSession(BookFlightJobKey).ToList());
 
-            var status = jobs.All(x => x.IsJobCompleted) ? Constants.AllJobsCompleted : Constants.JobInProgress;
+            var status = jobs.All(x => x.IsJobCompleted || x.IsJobCancelled) ? Constants.AllJobsCompleted : Constants.JobInProgress;
 
             return Json(new { Status = status, Message = "", result = jobs });
         }
 
         public IActionResult CancelJob(string jobId)
         {
-            if (string.IsNullOrWhiteSpace(jobId) || Guid.TryParse(jobId, out Guid jobGuid))
+            if (string.IsNullOrWhiteSpace(jobId) || !Guid.TryParse(jobId, out Guid jobGuid))
             {
                 return Json(new { Status = Constants.JobsNotFound, Message = Messages.NoJobsFound, result = new object[] { } });
             }
 
-            var cancellationResult = _longProcessService.CancelJob(jobGuid.ToString());
+            var cancellationResult = ToCancellationResultDto(_longProcessService.CancelJob(jobGuid.ToString()));
 
-            //TODO: needs a user action on the screen.
-            return null;
+            if (cancellationResult.Job != null && cancellationResult.Job.IsJobCancelled)
+            {
+                RemoveJobFromSession(cancellationResult.Job.ClientJobId);
+            }
+
+            var status = cancellationResult.Job != null ? Constants.JobFound : Constants.JobsNotFound;
+
+            return Json(new { Status = status, Message = cancellationResult.Message, result = new object[] { cancellationResult } });
         }
 
-        private void UpdateJobStatus(string key, IEnumerable<string> value)
+        private void UpdateJobInSession(string clientJobId, IEnumerable<string> value)
         {
-            HttpContext.Session.Set(key, value);
+            HttpContext.Session.Set(clientJobId, value);
         }
 
-        private IEnumerable<LongRunningJobDto> GetJobsFromSession(string key)
+        private void RemoveJobFromSession(string clientJobId)
         {
-            var jobs = HttpContext.Session.Get<IEnumerable<string>>(key);
+            HttpContext.Session.Remove(clientJobId);
+        }
+
+        private IEnumerable<LongRunningJobDto> GetJobsFromSession(string clientJobId)
+        {
+            var jobs = HttpContext.Session.Get<IEnumerable<string>>(clientJobId);
 
             if (jobs == null) yield break;
 
@@ -130,20 +153,7 @@ namespace LongRunningActions.Controllers
 
             foreach (var job in jobsWithUpdatedStatus)
             {
-                yield return new LongRunningJobDto
-                {
-                    JobId = job.JobId,
-                    ClientJobId = job.ClientJobId,
-                    Name = job.Name,
-                    IsJobCompleted = job.IsJobCompleted,
-                    IsJobCompletedWithError = job.IsJobCompletedWithError,
-                    Error = job.Error?.Message,
-                    IsJobStarted = job.IsJobStarted,
-                    CreatedOn = job.CreatedOn,
-                    CompletedOn = job.CompletedOn,
-                    LastUpdatedOn = job.LastUpdatedOn,
-                    StartedOn = job.StartedOn
-                };
+                yield return ToLongRunningJobDto(job);
             }
         }
 
@@ -166,7 +176,7 @@ namespace LongRunningActions.Controllers
             return View();
         }
 
-        public LongRunningJob PizzaJob
+        private LongRunningJob PizzaJob
         {
             get
             {
@@ -193,7 +203,7 @@ namespace LongRunningActions.Controllers
             }
         }
 
-        public LongRunningJob BookFlightJob
+        private LongRunningJob BookFlightJob
         {
             get
             {
@@ -209,7 +219,7 @@ namespace LongRunningActions.Controllers
 
                         _logger.LogInformation("Booking flight...");
                         cancellationToken.ThrowIfCancellationRequested();
-                        Thread.Sleep(new TimeSpan(0,0,20));
+                        Thread.Sleep(new TimeSpan(0, 0, 20));
                     },
                     Success = (job, cancellationToken) =>
                     {
@@ -217,6 +227,38 @@ namespace LongRunningActions.Controllers
                     }
                 };
             }
+        }
+
+        private LongRunningJobDto ToLongRunningJobDto(LongRunningJob job)
+        {
+            if (job == null) return null;
+
+            return new LongRunningJobDto
+            {
+                JobId = job.JobId,
+                ClientJobId = job.ClientJobId,
+                Name = job.Name,
+                IsJobCompleted = job.IsJobCompleted,
+                IsJobCompletedWithError = job.IsJobCompletedWithError,
+                IsJobCancelled = job.IsJobCancelled,
+                Error = job.Error?.Message,
+                IsJobStarted = job.IsJobStarted,
+                CreatedOn = job.CreatedOn,
+                CompletedOn = job.CompletedOn,
+                LastUpdatedOn = job.LastUpdatedOn,
+                StartedOn = job.StartedOn
+            };
+        }
+
+        private CancellationResultDto ToCancellationResultDto(JobCancellationResult cancellationResult)
+        {
+            return new CancellationResultDto
+            {
+                Job = ToLongRunningJobDto(cancellationResult.Job),
+                JobCancellationStatus = cancellationResult.JobCancellationStatus.ToString(),
+                JobId = cancellationResult.JobId,
+                Message = cancellationResult.Message
+            };
         }
     }
 

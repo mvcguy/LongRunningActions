@@ -56,6 +56,7 @@ namespace LongRunningActions.Services
                 {
                     job.JobId = Guid.NewGuid().ToString();
                 }
+
                 _jobQueue.Enqueue(job);
                 _logger.LogInformation($"New job with id {job.JobId} is queued for processing.");
                 _jobsHistory.TryAdd(job.JobId, job);
@@ -144,7 +145,7 @@ namespace LongRunningActions.Services
             catch (AggregateException aggregateException)
             {
                 foreach (var innerException in aggregateException.InnerExceptions)
-                    _logger.LogWarning($"{ServiceName} is stopped: " + aggregateException.Message + " " + innerException.Message);
+                    _logger.LogWarning($"{ServiceName} is stopped: {aggregateException.Message} {innerException.Message}");
             }
         }
 
@@ -187,6 +188,7 @@ namespace LongRunningActions.Services
 
                 try
                 {
+                    //task should not be null at this point.
                     Debug.Assert(task != null, "task != null");
                     job.CancellationTokenSource.Cancel();
                     task.Wait();
@@ -194,7 +196,20 @@ namespace LongRunningActions.Services
                 catch (Exception exception)
                 {
                     if (exception is TaskCanceledException || exception is OperationCanceledException)
+                    {
                         job.IsJobCancelled = true;
+                    }
+                    else
+                    {
+                        _logger.LogError(new EventId(501, "Job cancellation error"), exception,
+                            "Unexpected error while cancelling job");
+                        throw;
+                    }
+                }
+                finally
+                {
+                    _tasks.TryRemove(job.JobId, out Task rem);
+                    job.CancellationTokenSource?.Dispose();
                 }
             }
             return result;
@@ -222,8 +237,6 @@ namespace LongRunningActions.Services
 
             var task = new Task<string>(() =>
             {
-                var jobCancelled = false;
-
                 try
                 {
                     job.IsJobStarted = true;
@@ -239,8 +252,7 @@ namespace LongRunningActions.Services
                     }
                     catch (Exception exception)
                     {
-                        if (exception is TaskCanceledException || exception is OperationCanceledException)
-                            jobCancelled = true;
+                        UpdateJobIfCancelled(exception, job);
                     }
                     finally
                     {
@@ -251,8 +263,7 @@ namespace LongRunningActions.Services
                 catch (Exception e)
                 {
                     //invoke fail safely
-                    if (e is TaskCanceledException || e is OperationCanceledException)
-                        jobCancelled = true;
+                    UpdateJobIfCancelled(e, job);
 
                     try
                     {
@@ -261,8 +272,7 @@ namespace LongRunningActions.Services
                     }
                     catch (Exception exception)
                     {
-                        if (exception is TaskCanceledException || exception is OperationCanceledException)
-                            jobCancelled = true;
+                        UpdateJobIfCancelled(exception, job);
                     }
                     finally
                     {
@@ -277,11 +287,8 @@ namespace LongRunningActions.Services
                     try { job.Always?.Invoke(job, token); }
                     catch (Exception exception)
                     {
-                        if (exception is TaskCanceledException || exception is OperationCanceledException)
-                            jobCancelled = true;
+                        UpdateJobIfCancelled(exception, job);
                     }
-
-                    job.IsJobCancelled = jobCancelled;
                 }
                 return job.JobId;
             });
@@ -291,10 +298,19 @@ namespace LongRunningActions.Services
                 //when task is compelted remove it from the task list.
                 // ReSharper disable once UnusedVariable
                 _tasks.TryRemove(task1.Result, out Task rrr);
+                job.CancellationTokenSource?.Dispose();
             }, token);
 
             _tasks.TryAdd(job.JobId, task);
             task.Start();
+        }
+
+        private void UpdateJobIfCancelled(Exception exception, LongRunningJob job)
+        {
+            if (exception is TaskCanceledException || exception is OperationCanceledException)
+            {
+                job.IsJobCancelled = true;
+            }
         }
 
         protected virtual void ReleaseResources()

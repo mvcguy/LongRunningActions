@@ -6,6 +6,8 @@ namespace LongRunningActions.Models.Dtos
 
         public const string AllJobsCompleted = "201";
 
+        public const string JobFound = "200";
+
         public const string JobInProgress = "100";
 
         public const string JobQueuedForProcessing = "101";
