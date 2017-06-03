@@ -166,18 +166,18 @@
             var jobCompleted = false;
             var actionId;
 
-            if (job.isJobCompleted === true)
-            {
-                html = helpers.getText(messages.JobCompleted, alertTypes.success);
-                jobCompleted = true;
-            }
-            else if (job.isJobCancelled === true) {
+            if (job.isJobCancelled === true) {
                 html = helpers.getText(messages.jobCancelled, alertTypes.warning);
                 jobCompleted = true;
                 try {
                     notifyJobCancelled(job);
-                } catch (e) {}
+                } catch (e) { }
 
+            }
+            else if (job.isJobCompleted === true)
+            {
+                html = helpers.getText(messages.JobCompleted, alertTypes.success);
+                jobCompleted = true;
             }
             else
             {
@@ -202,12 +202,17 @@
             }
 
             if (actionId) {
-                $('#' + actionId).prop('disabled', !jobCompleted);
+                var action = $('#' + actionId);
+                action.prop('disabled', !jobCompleted);
+                
+                var cancelActionId = action.data('cancel-action');
+                var cancelAction = $('#' + cancelActionId);
+                cancelAction.prop('disabled', job.cancellationRequested || jobCompleted);
             }
         };
-
+        
         var doPoll = function () {
-
+            
             if (turnOnPolling === false) return;
 
             var html = '';
@@ -221,8 +226,12 @@
                             var message = 'Name: ' + job.name
                                 + ', Started On: ' + job.startedOn
                                 + ', Completed: ' + job.isJobCompleted
+                                + ', Cancelled: ' + job.isJobCancelled
                                 + ', Completed On: ' + job.completedOn;
-                            if (job.isJobCompleted === true)
+                            if (job.isJobCancelled === true) {
+                                html = $(html).add(helpers.getAlert(message, alertTypes.warning));
+                            }
+                            else if (job.isJobCompleted === true)
                                 html = $(html).add(helpers.getAlert(message, alertTypes.success));
                             else
                                 html = $(html).add(helpers.getAlert(message, alertTypes.info));

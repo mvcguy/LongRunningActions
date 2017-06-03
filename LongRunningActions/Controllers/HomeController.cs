@@ -35,7 +35,7 @@ namespace LongRunningActions.Controllers
             object result;
 
             var jobs = GetJobsFromSession(PizzaJobKey).ToList();
-            var previousJobCompleted = jobs.All(x => x.IsJobCompleted);
+            var previousJobCompleted = jobs.All(x => x.IsJobCompleted || x.IsJobCancelled);
 
             if (previousJobCompleted)
             {
@@ -69,7 +69,7 @@ namespace LongRunningActions.Controllers
             object result;
 
             var jobs = GetJobsFromSession(BookFlightJobKey).ToList();
-            var previousJobCompleted = jobs.All(x => x.IsJobCompleted);
+            var previousJobCompleted = jobs.All(x => x.IsJobCompleted || x.IsJobCancelled);
 
             if (previousJobCompleted)
             {
@@ -122,11 +122,6 @@ namespace LongRunningActions.Controllers
             }
 
             var cancellationResult = ToCancellationResultDto(_longProcessService.CancelJob(jobGuid.ToString()));
-
-            if (cancellationResult.Job != null && cancellationResult.Job.IsJobCancelled)
-            {
-                RemoveJobFromSession(cancellationResult.Job.ClientJobId);
-            }
 
             var status = cancellationResult.Job != null ? Constants.JobFound : Constants.JobsNotFound;
 
@@ -241,6 +236,7 @@ namespace LongRunningActions.Controllers
                 IsJobCompleted = job.IsJobCompleted,
                 IsJobCompletedWithError = job.IsJobCompletedWithError,
                 IsJobCancelled = job.IsJobCancelled,
+                CancellationRequested = job.CancellationRequested,
                 Error = job.Error?.Message,
                 IsJobStarted = job.IsJobStarted,
                 CreatedOn = job.CreatedOn,

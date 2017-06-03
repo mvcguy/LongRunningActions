@@ -85,6 +85,8 @@ namespace LongRunningActions.Services
             }
         }
 
+        public bool CancellationRequested { get; set; }
+
         public Exception Error { get; internal set; }
 
         public DateTime? CreatedOn { get; internal set; }

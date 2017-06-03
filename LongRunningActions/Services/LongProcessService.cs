@@ -155,6 +155,9 @@ namespace LongRunningActions.Services
 
             _jobsHistory.TryGetValue(jobGuid, out LongRunningJob job);
 
+            if (job != null)
+                job.CancellationRequested = true;
+
             var result = new JobCancellationResult
             {
                 Job = job,
@@ -214,7 +217,7 @@ namespace LongRunningActions.Services
             }
             return result;
         }
-
+        
         private void OnJobArrived()
         {
             if (_tasks.Count >= _options.MaxNumberOfTasks)

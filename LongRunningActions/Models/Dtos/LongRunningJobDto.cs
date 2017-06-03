@@ -18,6 +18,8 @@ namespace LongRunningActions.Models.Dtos
 
         public bool IsJobCancelled { get; set; }
 
+        public bool CancellationRequested { get; set; }
+
         public string Error { get; set; }
 
         public DateTime? CreatedOn { get; set; }
