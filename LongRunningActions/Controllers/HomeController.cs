@@ -154,14 +154,14 @@ namespace LongRunningActions.Controllers
 
         public IActionResult About()
         {
-            ViewData["Message"] = "Your application description page.";
+            ViewData["Message"] = "A proof of concept for running background tasks";
 
             return View();
         }
 
         public IActionResult Contact()
         {
-            ViewData["Message"] = "Your contact page.";
+            ViewData["Message"] = "Contact developer";
 
             return View();
         }
