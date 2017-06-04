@@ -170,6 +170,12 @@ namespace LongRunningActions.Services
                 result.JobCancellationStatus = JobCancellationStatus.JobNotFound;
             }
 
+            else if (job.IsJobCancelled)
+            {
+                result.Message = $"Job with id {jobGuid} is already cancelled.";
+                result.JobCancellationStatus = JobCancellationStatus.JobCancelled;
+            }
+
             else if (job.IsJobCompleted)
             {
                 result.Message = $"Job with id {jobGuid} was already completed, and thus cannot be cancelled";

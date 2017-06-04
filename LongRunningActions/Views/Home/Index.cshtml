@@ -165,6 +165,7 @@
             var msgsContainerId = null;
             var jobCompleted = false;
             var actionId;
+            var jobId = job.jobId;
 
             if (job.isJobCancelled === true) {
                 html = helpers.getText(messages.jobCancelled, alertTypes.warning);
@@ -197,12 +198,20 @@
                 default:
                     break;
             }
+            
             if (msgsContainerId && html) {
                 $('#' + msgsContainerId).html(html);
             }
 
             if (actionId) {
                 var action = $('#' + actionId);
+
+                if (jobId) {
+                    //during the refresh, the jobId is cleaned, we need to set the jobId because its needed for 
+                    //cancelling the job.
+                    helpers.setJobId(action, jobId);
+                }
+
                 action.prop('disabled', !jobCompleted);
                 
                 var cancelActionId = action.data('cancel-action');
